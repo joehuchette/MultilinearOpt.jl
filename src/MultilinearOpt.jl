@@ -26,29 +26,38 @@ type MultilinearData
     MultilinearData() = new(Dict{Tuple{JuMP.Variable,JuMP.Variable},JuMP.Variable}())
 end
 
+const method = :Logarithmic#:Unary
+
 function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::MultilinearFunction{D}, disc::Discretization)
-    n = length(disc.d)
+    r = length(disc.d)
     V = collect(Base.product(disc.d...))
     T = map(t -> mlf.f(t...), V)
     λ = JuMP.@variable(m, [V], lowerbound=0, upperbound=1, basename="λ")
     z = JuMP.@variable(m, basename="z")
     JuMP.@constraint(m, sum(λ) == 1)
-    for i in 1:n
+    for i in 1:r
         JuMP.@constraint(m, sum(λ[v]*v[i] for v in V) == x[i])
     end
     JuMP.@constraint(m, sum(λ[v]*mlf.f(v...) for v in V)  == z)
-    for i in 1:n
+    for i in 1:r
         I = disc.d[i]
-        t = length(I)
-        k = ceil(Int, log2(t))
-        H = PiecewiseLinear.reflected_gray(k)
-        y = JuMP.@variable(m, [1:k], Bin, basename="y")
-        JuMP.@expression(m, γ[j=1:t], sum(λ[v] for v in V if v[i] == I[j]))
-        for j in 1:k
-            JuMP.@constraints(m, begin
-                H[1][j]*γ[1] + sum(min(H[v][j],H[v-1][j])*γ[v] for v in 2:n-1) + H[n][j]*γ[n] ≤ y[j]
-                H[1][j]*γ[1] + sum(max(H[v][j],H[v-1][j])*γ[v] for v in 2:n-1) + H[n][j]*γ[n] ≥ y[j]
-            end)
+        n = length(I)-1
+        JuMP.@expression(m, γ[j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
+        if method == :Logarithmic
+            k = ceil(Int, log2(n))
+            H = PiecewiseLinear.reflected_gray(k)
+            y = JuMP.@variable(m, [1:k], Bin, basename="y")
+            for j in 1:k
+                JuMP.@constraints(m, begin
+                    H[1][j]*γ[1] + sum(min(H[v][j],H[v-1][j])*γ[v] for v in 2:n) + H[n][j]*γ[n+1] ≤ y[j]
+                    H[1][j]*γ[1] + sum(max(H[v][j],H[v-1][j])*γ[v] for v in 2:n) + H[n][j]*γ[n+1] ≥ y[j]
+                end)
+            end
+        elseif method == :Unary
+            y = JuMP.@variable(m, [1:t], Bin, basename="y")
+            # for j in 1:t
+                # JuMP.@constraint(m, sum(γ[v] for v in ))
+            # end
         end
     end
     z

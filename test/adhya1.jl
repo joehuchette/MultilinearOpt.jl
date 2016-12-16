@@ -12,7 +12,7 @@ L = 1:2 # Pools
 K = 1:4 # Qualities
 
 # i,l -> Bool
-Tx(i,l) = (i,l) == (1,1) ? false : true
+Tx(i,l) = (i,l) in ((1,1),(2,1),(3,1),(4,2),(5,2)) ? true : false
 Ty(l,j) = true
 Tz(i,j) = false
 
@@ -48,10 +48,10 @@ CC = [1.0    6.0  4.0  0.5
       1.0    2.7  4.0  1.6]
 
 # Maximum Allowable Product Concentration
-PU = [3.00  3.00  3.25  0.75
-      4.00  2.50  3.50  1.50
-      1.50  5.50  3.90  0.80
-      3.00  4.00  4.00  1.80]
+PU(j,k) = [3.00  3.00  3.25  0.75
+           4.00  2.50  3.50  1.50
+           1.50  5.50  3.90  0.80
+           3.00  4.00  4.00  1.80][j,k]
 
 # Minimum Allowable Product Concentration
 PL(j,k) = 0.0
@@ -59,30 +59,28 @@ PL(j,k) = 0.0
 #
 # Hard Bounds
 
-@variable(m, 0 ≤ q[i in I, l in L] ≤ 1)#(Tx(i,l) ? 1 : Inf))
+@variable(m, 0 ≤ q[i in I, l in L] ≤ (Tx(i,l) ? 1 : Inf))
 @variable(m, 0 ≤ y[l in L, j in J] ≤ min(SS(l), DU(j), sum(AU(i) for i in I if Tx(i,l))))
 @variable(m, 0 ≤ z[i in I, j in J] ≤ min(AU(i), DU(j)))
 
 #
 # Standard Pooling Problem
 
-@objective(m, Min, sum(c[i]*q[i,l]*y[l,j] for i in I, l in L, j in J if Tx(i,l) && Ty(l,j)) -
-                   sum(d[j]*y[l,j] for l in L, j in J if Ty(l,j)) -
-                   sum((d[j]-c[i])*z[i,j] for i in I, j in J if Tz(i,j)))
+@objective(m, Min, sum(c[i]*q[i,l]*y[l,j] for i in I, l in L, j in J if Tx(i,l) && Ty(l,j)) - sum(d[j]*y[l,j] for l in L, j in J if Ty(l,j)) - sum((d[j]-c[i])*z[i,j] for i in I, j in J if Tz(i,j)))
 
 # Availability bounds
 for i in I
-    if isfinite(AL(i))
+    if AL(i) > 0
         @constraint(m, sum(q[i,l]*y[l,j] for j in J, l in L if Tx(i,l) && Ty(l,j)) + sum(z[i,j] for j in J if Tz(i,j)) ≥ AL(i))
     end
-    if isfinite(AU(i))
+    if AU(i) < Inf
         @constraint(m, sum(q[i,l]*y[l,j] for j in J, l in L if Tx(i,l) && Ty(l,j)) + sum(z[i,j] for j in J if Tz(i,j)) ≤ AU(i))
     end
 end
 
 # Pool Capacity ========================
 for l in L
-    if isfinite(SS(l))
+    if SS(l) < Inf
         @constraint(m, sum(y[l,j] for j in J if Ty(l,j)) ≤ SS(l))
     end
 end
@@ -90,20 +88,20 @@ end
 # Product Demand =======================
 for j in J
     if DL(j) > 0
-        @constraints(m, begin
-            sum(y[l,j] for l in L if Ty(l,j)) + sum(z[i,j] for i in I if Tz(i,j)) ≥ DL(j)
-            sum(y[l,j] for l in L if Ty(l,j)) + sum(z[i,j] for i in I if Tz(i,j)) ≤ DU(j)
-        end)
+        @constraint(m, sum(y[l,j] for l in L if Ty(l,j)) + sum(z[i,j] for i in I if Tz(i,j)) ≥ DL(j))
+    end
+    if DU(j) < Inf
+        @constraint(m, sum(y[l,j] for l in L if Ty(l,j)) + sum(z[i,j] for i in I if Tz(i,j)) ≤ DU(j))
     end
 end
 
 # Product Quality ======================
 for j in J, k in K
     if PL(j,k) > 0
-        @constraints(m, begin
-            PL(j,k)*(sum(y[l,j] for l in L if Ty(l,j)) + sum(z[i,j] for i in I if Tz(i,j))) ≤ sum(CC(i,k)*z[i,j] for i in I if Tz(i,j)) + sum(CC(i,k)*q[i,l]*y[l,j] for i in I, l in L if Tx(i,l) && Ty(l,j))
-            PU(j,k)*(sum(y[l,j] for l in L if Ty(l,j)) + sum(z[i,j] for i in I if Tz(i,j))) ≥ sum(CC(i,k)*z[i,j] for i in I if Tz(i,j)) + sum(CC(i,k)*q[i,l]*y[l,j] for i in I, l in L if Tx(i,l) && Ty(l,j))
-        end)
+        @constraint(m, PL(j,k)*(sum(y[l,j] for l in L if Ty(l,j)) + sum(z[i,j] for i in I if Tz(i,j))) ≤ sum(CC[i,k]*z[i,j] for i in I if Tz(i,j)) + sum(CC[i,k]*q[i,l]*y[l,j] for i in I, l in L if Tx(i,l) && Ty(l,j)))
+    end
+    if PU(j,k) < Inf
+        @constraint(m, PU(j,k)*(sum(y[l,j] for l in L if Ty(l,j)) + sum(z[i,j] for i in I if Tz(i,j))) ≥ sum(CC[i,k]*z[i,j] for i in I if Tz(i,j)) + sum(CC[i,k]*q[i,l]*y[l,j] for i in I, l in L if Tx(i,l) && Ty(l,j)))
     end
 end
 
@@ -117,4 +115,5 @@ for l in L, j in J
     @constraint(m, sum(q[i,l]*y[l,j] for i in I if Tx(i,l)) == y[l,j])
 end
 
+relaxbilinear!(m)
 solve(m)
