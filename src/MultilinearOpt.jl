@@ -26,38 +26,93 @@ type MultilinearData
     MultilinearData() = new(Dict{Tuple{JuMP.Variable,JuMP.Variable},JuMP.Variable}())
 end
 
-const method = :Logarithmic#:Unary
-
-function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::MultilinearFunction{D}, disc::Discretization)
+function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::MultilinearFunction{D}, disc::Discretization; method=:Logarithmic)
+    vform = (method in (:Logarithmic,:Unary))
     r = length(disc.d)
     V = collect(Base.product(disc.d...))
     T = map(t -> mlf.f(t...), V)
-    λ = JuMP.@variable(m, [V], lowerbound=0, upperbound=1, basename="λ")
     z = JuMP.@variable(m, basename="z")
-    JuMP.@constraint(m, sum(λ) == 1)
-    for i in 1:r
-        JuMP.@constraint(m, sum(λ[v]*v[i] for v in V) == x[i])
-    end
-    JuMP.@constraint(m, sum(λ[v]*mlf.f(v...) for v in V)  == z)
-    for i in 1:r
-        I = disc.d[i]
-        n = length(I)-1
-        JuMP.@expression(m, γ[j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
-        if method == :Logarithmic
-            k = ceil(Int, log2(n))
-            H = PiecewiseLinear.reflected_gray(k)
-            y = JuMP.@variable(m, [1:k], Bin, basename="y")
-            for j in 1:k
+    if vform
+        λ = JuMP.@variable(m, [V], lowerbound=0, upperbound=1, basename="λ")
+        JuMP.@constraint(m, sum(λ) == 1)
+        for i in 1:r
+            JuMP.@constraint(m, sum(λ[v]*v[i] for v in V) == x[i])
+        end
+        JuMP.@constraint(m, sum(λ[v]*mlf.f(v...) for v in V)  == z)
+        for i in 1:r
+            I = disc.d[i]
+            n = length(I)-1
+            if method == :Logarithmic
+                JuMP.@expression(m, γ[j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
+                k = ceil(Int, log2(n))
+                H = PiecewiseLinear.reflected_gray(k)
+                y = JuMP.@variable(m, [1:k], Bin, basename="y")
+                for j in 1:k
+                    JuMP.@constraints(m, begin
+                        H[1][j]*γ[1] + sum(min(H[v][j],H[v-1][j])*γ[v] for v in 2:n) + H[n][j]*γ[n+1] ≤ y[j]
+                        H[1][j]*γ[1] + sum(max(H[v][j],H[v-1][j])*γ[v] for v in 2:n) + H[n][j]*γ[n+1] ≥ y[j]
+                    end)
+                end
+            elseif method == :Unary
+                y = JuMP.@variable(m, [1:t], Bin, basename="y")
+                # for j in 1:t
+                    # JuMP.@constraint(m, sum(γ[v] for v in ))
+                # end
+            end
+        end
+    else
+        # Methods from Misener only work for bilinear terms, and discretized along only one dimension
+        @assert D <= 2
+        @assert minimum(map(length, disc.d)) == 2
+        iˣ = length(disc.d[1]) == 2 ? 2 : 1 # direction we discretize along
+        iʸ = iˣ == 1 ? 2 : 1
+        I = disc.d[iˣ]
+        Np = length(I)-1
+        xᴸ, xᵁ = minimum(I), maximum(I)
+        yᴸ, yᵁ = minimum(disc.d[iʸ]), maximum(disc.d[iʸ])
+        a = I[2] - I[1] # should assert all lengths are the same
+        x, y = x[iˣ], x[iʸ]
+        if method == :MisenerLinear
+            λ  = JuMP.@variable(m, [1:Np], Bin)
+            Δy = JuMP.@variable(m, [1:Np], lowerbound=0, upperbound=yᵁ-yᴸ)
+            JuMP.@constraint(m, sum(λ) == 1)
+            JuMP.@constraints(m, begin
+                xᴸ + sum(a*(np-1)*λ[np] for np in 1:Np) ≤ x
+                x ≤ xᴸ + sum(a*np*λ[np] for np in 1:Np)
+            end)
+            JuMP.@constraints(m, begin
+                y == yᴸ + sum(Δy[np] for np in 1:Np)
+                [np=1:Np], Δy[np] ≤ (yᵁ-yᴸ)*λ[np]
+            end)
+            JuMP.@constraints(m, begin
+                z ≥ x*yᴸ + sum((xᴸ+a*(np-1))* Δy[np]               for np in 1:Np)
+                z ≥ x*yᵁ + sum((xᴸ+a* np   )*(Δy[np]-(yᵁ-yᴸ)*λ[np]) for np in 1:Np)
+                z ≤ x*yᴸ + sum((xᴸ+a* np   )* Δy[np]               for np in 1:Np)
+                z ≤ x*yᵁ + sum((xᴸ+a*(np-1))*(Δy[np]-(yᵁ-yᴸ)*λ[np]) for np in 1:Np)
+            end)
+        elseif method == :MisenerLog
+            NL = ceil(Int, log2(Np))
+            λ  = JuMP.@variable(m, [1:NL], Bin)
+            Δy = JuMP.@variable(m, [1:NL], lowerbound=0, upperbound=yᵁ-yᴸ)
+            s  = JuMP.@variable(m, [1:NL], lowerbound=0, upperbound=yᵁ-yᴸ)
+            JuMP.@constraints(m, begin
+                xᴸ + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≤ x
+                x ≤ xᴸ + a + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL)
+                xᴸ + a + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≤ xᵁ
+            end)
+            for nL in 1:NL
                 JuMP.@constraints(m, begin
-                    H[1][j]*γ[1] + sum(min(H[v][j],H[v-1][j])*γ[v] for v in 2:n) + H[n][j]*γ[n+1] ≤ y[j]
-                    H[1][j]*γ[1] + sum(max(H[v][j],H[v-1][j])*γ[v] for v in 2:n) + H[n][j]*γ[n+1] ≥ y[j]
+                    Δy[nL] ≤ (yᵁ-yᴸ)*λ[nL]
+                    Δy[nL] == (y-yᴸ) - s[nL]
+                    s[nL] ≤ (yᵁ-yᴸ)*(1-λ[nL])
                 end)
             end
-        elseif method == :Unary
-            y = JuMP.@variable(m, [1:t], Bin, basename="y")
-            # for j in 1:t
-                # JuMP.@constraint(m, sum(γ[v] for v in ))
-            # end
+            JuMP.@constraints(m, begin
+                z ≥ x*yᴸ + xᴸ*(y-yᴸ) + sum(a*2^(nL-1)*Δy[nL] for nL in 1:NL)
+                z ≥ x*yᵁ + (xᴸ+a)*(y-yᵁ) + sum(a*2^(nL-1)*(Δy[nL]-(yᵁ-yᴸ)*λ[nL]) for nL in 1:NL)
+                z ≤ x*yᴸ + (xᴸ+a)*(y-yᴸ) + sum(a*2^(nL-1)*Δy[nL] for nL in 1:NL)
+                z ≤ x*yᵁ + xᴸ*(y-yᵁ) + sum(a*2^(nL-1)*(Δy[nL]-(yᵁ-yᴸ)*λ[nL]) for nL in 1:NL)
+            end)
         end
     end
     z
@@ -107,7 +162,8 @@ function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dic
             mlf = MultilinearFunction(hr, (a,b) -> a*b)
             disc_levelˣ = lˣ == uˣ ? 1 : default_disc_level # if variable is fixed, no need to discretize
             disc_levelʸ = lʸ == uʸ ? 1 : default_disc_level
-            disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,disc_levelʸ))
+            # disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,disc_levelʸ))
+            disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,2))
             z = outerapproximate(m, (t.qvars1[i],t.qvars2[i]), mlf, disc)
             product_dict[(x,y)] = z
             product_dict[(y,x)] = z
