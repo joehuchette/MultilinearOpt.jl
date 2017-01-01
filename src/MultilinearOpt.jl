@@ -68,50 +68,76 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
         iʸ = iˣ == 1 ? 2 : 1
         I = disc.d[iˣ]
         Np = length(I)-1
-        xᴸ, xᵁ = minimum(I), maximum(I)
-        yᴸ, yᵁ = minimum(disc.d[iʸ]), maximum(disc.d[iʸ])
+        xˡ, xᵘ = minimum(I), maximum(I)
+        yˡ, yᵘ = minimum(disc.d[iʸ]), maximum(disc.d[iʸ])
         a = I[2] - I[1] # should assert all lengths are the same
         x, y = x[iˣ], x[iʸ]
         if method == :MisenerLinear
             λ  = JuMP.@variable(m, [1:Np], Bin)
-            Δy = JuMP.@variable(m, [1:Np], lowerbound=0, upperbound=yᵁ-yᴸ)
+            Δy = JuMP.@variable(m, [1:Np], lowerbound=0, upperbound=yᵘ-yˡ)
             JuMP.@constraint(m, sum(λ) == 1)
             JuMP.@constraints(m, begin
-                xᴸ + sum(a*(np-1)*λ[np] for np in 1:Np) ≤ x
-                x ≤ xᴸ + sum(a*np*λ[np] for np in 1:Np)
+                xˡ + sum(a*(np-1)*λ[np] for np in 1:Np) ≤ x
+                x ≤ xˡ + sum(a*np*λ[np] for np in 1:Np)
             end)
             JuMP.@constraints(m, begin
-                y == yᴸ + sum(Δy[np] for np in 1:Np)
-                [np=1:Np], Δy[np] ≤ (yᵁ-yᴸ)*λ[np]
+                y == yˡ + sum(Δy[np] for np in 1:Np)
+                [np=1:Np], Δy[np] ≤ (yᵘ-yˡ)*λ[np]
             end)
             JuMP.@constraints(m, begin
-                z ≥ x*yᴸ + sum((xᴸ+a*(np-1))* Δy[np]               for np in 1:Np)
-                z ≥ x*yᵁ + sum((xᴸ+a* np   )*(Δy[np]-(yᵁ-yᴸ)*λ[np]) for np in 1:Np)
-                z ≤ x*yᴸ + sum((xᴸ+a* np   )* Δy[np]               for np in 1:Np)
-                z ≤ x*yᵁ + sum((xᴸ+a*(np-1))*(Δy[np]-(yᵁ-yᴸ)*λ[np]) for np in 1:Np)
+                z ≥ x*yˡ + sum((xˡ+a*(np-1))* Δy[np]                for np in 1:Np)
+                z ≥ x*yᵘ + sum((xˡ+a* np   )*(Δy[np]-(yᵘ-yˡ)*λ[np]) for np in 1:Np)
+                z ≤ x*yˡ + sum((xˡ+a* np   )* Δy[np]                for np in 1:Np)
+                z ≤ x*yᵘ + sum((xˡ+a*(np-1))*(Δy[np]-(yᵘ-yˡ)*λ[np]) for np in 1:Np)
             end)
-        elseif method == :MisenerLog
+        elseif method == :MisenerLog1
+            NL = ceil(Int, log2(Np))
+            λ    = JuMP.@variable(m, [1:NL], Bin)
+            Δy   = JuMP.@variable(m, [1:Np], lowerbound=0, upperbound=yᵘ-yˡ)
+            λhat = JuMP.@variable(m, [1:Np], lowerbound=0, upperbound=1)
+            JuMP.@constraints(m, begin
+                xˡ + sum(2^(NL-nL)*a*λ[nL] for nL in 1:NL)     ≤ x
+                xˡ + sum(2^(NL-nL)*a*λ[nL] for nL in 1:NL) + a ≥ x
+            end)
+            JuMP.@constraint(m, sum(λhat) == 1)
+            for nL in 1:NL
+                JuMP.@constraints(m, begin
+                    sum(λhat[np] for np in 1:Np if mod(floor((np-1)/2^(NL-nL))==0, 2) ≤ 1 - λ[nL])
+                    sum(λhat[np] for np in 1:Np if mod(floor((np-1)/2^(NL-nL))==1, 2) ≤     λ[nL])
+                end)
+            end
+            for np in 1:Np
+                JuMP.@constraint(m, Δy[np] ≤ (yᵘ-yˡ)*λhat[np])
+            end
+            JuMP.@constraint(m, y == yˡ + sum(Δy))
+            JuMP.@constraints(m, begin
+                z ≥ x*yˡ + sum((xˡ+a*(np-1))* Δy[np]                   for np in 1:Np)
+                z ≥ x*yᵘ + sum((xˡ+a* np   )*(Δy[np]-(yᵘ-yˡ)*λhat[np]) for np in 1:Np)
+                z ≤ x*yˡ + sum((xˡ+a* np   )* Δy[np]                   for np in 1:Np)
+                z ≤ x*yᵘ + sum((xˡ+a*(np-1))*(Δy[np]-(yᵘ-yˡ)*λhat[np]) for np in 1:Np)
+            end)
+        elseif method == :MisenerLog2
             NL = ceil(Int, log2(Np))
             λ  = JuMP.@variable(m, [1:NL], Bin)
-            Δy = JuMP.@variable(m, [1:NL], lowerbound=0, upperbound=yᵁ-yᴸ)
-            s  = JuMP.@variable(m, [1:NL], lowerbound=0, upperbound=yᵁ-yᴸ)
+            Δy = JuMP.@variable(m, [1:NL], lowerbound=0, upperbound=yᵘ-yˡ)
+            s  = JuMP.@variable(m, [1:NL], lowerbound=0, upperbound=yᵘ-yˡ)
             JuMP.@constraints(m, begin
-                xᴸ + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≤ x
-                x ≤ xᴸ + a + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL)
-                xᴸ + a + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≤ xᵁ
+                xˡ + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≤ x
+                x ≤ xˡ + a + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL)
+                xˡ + a + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≤ xᵘ
             end)
             for nL in 1:NL
                 JuMP.@constraints(m, begin
-                    Δy[nL] ≤ (yᵁ-yᴸ)*λ[nL]
-                    Δy[nL] == (y-yᴸ) - s[nL]
-                    s[nL] ≤ (yᵁ-yᴸ)*(1-λ[nL])
+                    Δy[nL] ≤ (yᵘ-yˡ)*λ[nL]
+                    Δy[nL] == (y-yˡ) - s[nL]
+                    s[nL] ≤ (yᵘ-yˡ)*(1-λ[nL])
                 end)
             end
             JuMP.@constraints(m, begin
-                z ≥ x*yᴸ + xᴸ*(y-yᴸ) + sum(a*2^(nL-1)*Δy[nL] for nL in 1:NL)
-                z ≥ x*yᵁ + (xᴸ+a)*(y-yᵁ) + sum(a*2^(nL-1)*(Δy[nL]-(yᵁ-yᴸ)*λ[nL]) for nL in 1:NL)
-                z ≤ x*yᴸ + (xᴸ+a)*(y-yᴸ) + sum(a*2^(nL-1)*Δy[nL] for nL in 1:NL)
-                z ≤ x*yᵁ + xᴸ*(y-yᵁ) + sum(a*2^(nL-1)*(Δy[nL]-(yᵁ-yᴸ)*λ[nL]) for nL in 1:NL)
+                z ≥ x*yˡ + xˡ*(y-yˡ) + sum(a*2^(nL-1)*Δy[nL] for nL in 1:NL)
+                z ≥ x*yᵘ + (xˡ+a)*(y-yᵘ) + sum(a*2^(nL-1)*(Δy[nL]-(yᵘ-yˡ)*λ[nL]) for nL in 1:NL)
+                z ≤ x*yˡ + (xˡ+a)*(y-yˡ) + sum(a*2^(nL-1)*Δy[nL] for nL in 1:NL)
+                z ≤ x*yᵘ + xˡ*(y-yᵘ) + sum(a*2^(nL-1)*(Δy[nL]-(yᵘ-yˡ)*λ[nL]) for nL in 1:NL)
             end)
         end
     end
