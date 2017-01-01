@@ -1,6 +1,6 @@
 module MultilinearOpt
 
-import JuMP, PiecewiseLinear
+import JuMP, PiecewiseLinearOpt
 
 export HyperRectangle, MultilinearFunction, Discretization, outerapproximate, relaxbilinear!
 
@@ -45,7 +45,7 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
             if method == :Logarithmic
                 JuMP.@expression(m, γ[j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
                 k = ceil(Int, log2(n))
-                H = PiecewiseLinear.reflected_gray(k)
+                H = PiecewiseLinearOpt.reflected_gray(k)
                 y = JuMP.@variable(m, [1:k], Bin, basename="y")
                 for j in 1:k
                     JuMP.@constraints(m, begin
