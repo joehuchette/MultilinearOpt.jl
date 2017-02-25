@@ -26,9 +26,10 @@ type MultilinearData
     MultilinearData() = new(Dict{Tuple{JuMP.Variable,JuMP.Variable},JuMP.Variable}())
 end
 
-function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::MultilinearFunction{D}, disc::Discretization; method=:Logarithmic)
-    vform = (method in (:Logarithmic,:Unary))
+function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::MultilinearFunction{D}, disc::Discretization, method)
+    vform = (method in (:Logarithmic1D,:Logarithmic2D,:Unary))
     r = length(disc.d)
+    @assert r == 2
     V = collect(Base.product(disc.d...))
     T = map(t -> mlf.f(t...), V)
     z = JuMP.@variable(m, basename="z")
@@ -42,7 +43,7 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
         for i in 1:r
             I = disc.d[i]
             n = length(I)-1
-            if method == :Logarithmic
+            if method == :Logarithmic1D || method == :Logarithmic2D
                 JuMP.@expression(m, γ[j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
                 k = ceil(Int, log2(n))
                 H = PiecewiseLinearOpt.reflected_gray(k)
@@ -62,39 +63,38 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
         end
     else
         # Methods from Misener only work for bilinear terms, and discretized along only one dimension
-        @assert D <= 2
         @assert minimum(map(length, disc.d)) == 2
         iˣ = length(disc.d[1]) == 2 ? 2 : 1 # direction we discretize along
         iʸ = iˣ == 1 ? 2 : 1
         I = disc.d[iˣ]
-        Np = length(I)-1
+        NP = length(I)-1
         xˡ, xᵘ = minimum(I), maximum(I)
         yˡ, yᵘ = minimum(disc.d[iʸ]), maximum(disc.d[iʸ])
         a = I[2] - I[1] # should assert all lengths are the same
         x, y = x[iˣ], x[iʸ]
         if method == :MisenerLinear
-            λ  = JuMP.@variable(m, [1:Np], Bin)
-            Δy = JuMP.@variable(m, [1:Np], lowerbound=0, upperbound=yᵘ-yˡ)
+            λ  = JuMP.@variable(m, [1:NP], Bin)
+            Δy = JuMP.@variable(m, [1:NP], lowerbound=0, upperbound=yᵘ-yˡ)
             JuMP.@constraint(m, sum(λ) == 1)
             JuMP.@constraints(m, begin
-                xˡ + sum(a*(np-1)*λ[np] for np in 1:Np) ≤ x
-                x ≤ xˡ + sum(a*np*λ[np] for np in 1:Np)
+                xˡ + sum(a*(nP-1)*λ[nP] for nP in 1:NP) ≤ x
+                x ≤ xˡ + sum(a*nP*λ[nP] for nP in 1:NP)
             end)
             JuMP.@constraints(m, begin
-                y == yˡ + sum(Δy[np] for np in 1:Np)
-                [np=1:Np], Δy[np] ≤ (yᵘ-yˡ)*λ[np]
+                y == yˡ + sum(Δy[nP] for nP in 1:NP)
+                [nP=1:NP], Δy[nP] ≤ (yᵘ-yˡ)*λ[nP]
             end)
             JuMP.@constraints(m, begin
-                z ≥ x*yˡ + sum((xˡ+a*(np-1))* Δy[np]                for np in 1:Np)
-                z ≥ x*yᵘ + sum((xˡ+a* np   )*(Δy[np]-(yᵘ-yˡ)*λ[np]) for np in 1:Np)
-                z ≤ x*yˡ + sum((xˡ+a* np   )* Δy[np]                for np in 1:Np)
-                z ≤ x*yᵘ + sum((xˡ+a*(np-1))*(Δy[np]-(yᵘ-yˡ)*λ[np]) for np in 1:Np)
+                z ≥ x*yˡ + sum((xˡ+a*(nP-1))* Δy[nP]                for nP in 1:NP)
+                z ≥ x*yᵘ + sum((xˡ+a* nP   )*(Δy[nP]-(yᵘ-yˡ)*λ[nP]) for nP in 1:NP)
+                z ≤ x*yˡ + sum((xˡ+a* nP   )* Δy[nP]                for nP in 1:NP)
+                z ≤ x*yᵘ + sum((xˡ+a*(nP-1))*(Δy[nP]-(yᵘ-yˡ)*λ[nP]) for nP in 1:NP)
             end)
         elseif method == :MisenerLog1
-            NL = ceil(Int, log2(Np))
+            NL = ceil(Int, log2(NP))
             λ    = JuMP.@variable(m, [1:NL], Bin)
-            Δy   = JuMP.@variable(m, [1:Np], lowerbound=0, upperbound=yᵘ-yˡ)
-            λhat = JuMP.@variable(m, [1:Np], lowerbound=0, upperbound=1)
+            Δy   = JuMP.@variable(m, [1:NP], lowerbound=0, upperbound=yᵘ-yˡ)
+            λhat = JuMP.@variable(m, [1:NP], lowerbound=0, upperbound=1)
             JuMP.@constraints(m, begin
                 xˡ + sum(2^(NL-nL)*a*λ[nL] for nL in 1:NL)     ≤ x
                 xˡ + sum(2^(NL-nL)*a*λ[nL] for nL in 1:NL) + a ≥ x
@@ -102,28 +102,28 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
             JuMP.@constraint(m, sum(λhat) == 1)
             for nL in 1:NL
                 JuMP.@constraints(m, begin
-                    sum(λhat[np] for np in 1:Np if mod(floor((np-1)/2^(NL-nL))==0, 2) ≤ 1 - λ[nL])
-                    sum(λhat[np] for np in 1:Np if mod(floor((np-1)/2^(NL-nL))==1, 2) ≤     λ[nL])
+                    sum(λhat[nP] for nP in 1:NP if mod(floor((nP-1)/2^(NL-nL)),2)==0) ≤ 1 - λ[nL]
+                    sum(λhat[nP] for nP in 1:NP if mod(floor((nP-1)/2^(NL-nL)),2)==1) ≤     λ[nL]
                 end)
             end
-            for np in 1:Np
-                JuMP.@constraint(m, Δy[np] ≤ (yᵘ-yˡ)*λhat[np])
+            for nP in 1:NP
+                JuMP.@constraint(m, Δy[nP] ≤ (yᵘ-yˡ)*λhat[nP])
             end
             JuMP.@constraint(m, y == yˡ + sum(Δy))
             JuMP.@constraints(m, begin
-                z ≥ x*yˡ + sum((xˡ+a*(np-1))* Δy[np]                   for np in 1:Np)
-                z ≥ x*yᵘ + sum((xˡ+a* np   )*(Δy[np]-(yᵘ-yˡ)*λhat[np]) for np in 1:Np)
-                z ≤ x*yˡ + sum((xˡ+a* np   )* Δy[np]                   for np in 1:Np)
-                z ≤ x*yᵘ + sum((xˡ+a*(np-1))*(Δy[np]-(yᵘ-yˡ)*λhat[np]) for np in 1:Np)
+                z ≥ x*yˡ + sum((xˡ+a*(nP-1))* Δy[nP]                   for nP in 1:NP)
+                z ≥ x*yᵘ + sum((xˡ+a* nP   )*(Δy[nP]-(yᵘ-yˡ)*λhat[nP]) for nP in 1:NP)
+                z ≤ x*yˡ + sum((xˡ+a* nP   )* Δy[nP]                   for nP in 1:NP)
+                z ≤ x*yᵘ + sum((xˡ+a*(nP-1))*(Δy[nP]-(yᵘ-yˡ)*λhat[nP]) for nP in 1:NP)
             end)
         elseif method == :MisenerLog2
-            NL = ceil(Int, log2(Np))
+            NL = ceil(Int, log2(NP))
             λ  = JuMP.@variable(m, [1:NL], Bin)
             Δy = JuMP.@variable(m, [1:NL], lowerbound=0, upperbound=yᵘ-yˡ)
             s  = JuMP.@variable(m, [1:NL], lowerbound=0, upperbound=yᵘ-yˡ)
             JuMP.@constraints(m, begin
-                xˡ + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≤ x
-                x ≤ xˡ + a + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL)
+                xˡ +     sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≤ x
+                xˡ + a + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≥ x
                 xˡ + a + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≤ xᵘ
             end)
             for nL in 1:NL
@@ -134,24 +134,24 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
                 end)
             end
             JuMP.@constraints(m, begin
-                z ≥ x*yˡ + xˡ*(y-yˡ) + sum(a*2^(nL-1)*Δy[nL] for nL in 1:NL)
+                z ≥ x*yˡ +  xˡ   *(y-yˡ) + sum(a*2^(nL-1)* Δy[nL]             for nL in 1:NL)
                 z ≥ x*yᵘ + (xˡ+a)*(y-yᵘ) + sum(a*2^(nL-1)*(Δy[nL]-(yᵘ-yˡ)*λ[nL]) for nL in 1:NL)
-                z ≤ x*yˡ + (xˡ+a)*(y-yˡ) + sum(a*2^(nL-1)*Δy[nL] for nL in 1:NL)
-                z ≤ x*yᵘ + xˡ*(y-yᵘ) + sum(a*2^(nL-1)*(Δy[nL]-(yᵘ-yˡ)*λ[nL]) for nL in 1:NL)
+                z ≤ x*yˡ + (xˡ+a)*(y-yˡ) + sum(a*2^(nL-1)* Δy[nL]             for nL in 1:NL)
+                z ≤ x*yᵘ +  xˡ   *(y-yᵘ) + sum(a*2^(nL-1)*(Δy[nL]-(yᵘ-yˡ)*λ[nL]) for nL in 1:NL)
             end)
         end
     end
     z
 end
 
-const default_disc_level = 5
+const default_disc_level = 9
 
-function relaxbilinear!(m::JuMP.Model)
+function relaxbilinear!(m::JuMP.Model; method=:Logarithmic)
     # replace each bilinear term in (nonconvex) quadratic constraints with outer approx
     product_dict = Dict() #m.ext[:Multilinear].product_dict
     nonconvex = true # TODO: check this
     if nonconvex
-        aff = linearize_quadratic!(m, m.obj, product_dict)
+        aff = linearize_quadratic!(m, m.obj, product_dict, method)
         m.obj = JuMP.QuadExpr(aff)
     end
     for q in m.quadconstr
@@ -159,7 +159,7 @@ function relaxbilinear!(m::JuMP.Model)
         if nonconvex
             # TODO: merge terms (i.e. x*y + 2x*y = 3x*y)
             t = q.terms
-            aff = linearize_quadratic!(m, t, product_dict)
+            aff = linearize_quadratic!(m, t, product_dict, method)
             lb = q.sense == :<= ? -Inf : -aff.constant
             ub = q.sense == :>= ?  Inf : -aff.constant
             aff.constant = 0
@@ -171,7 +171,7 @@ function relaxbilinear!(m::JuMP.Model)
     nothing
 end
 
-function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dict)
+function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dict, method)
     aff = copy(t.aff)
     for i in 1:length(t.qvars1)
         x, y = t.qvars1[i], t.qvars2[i]
@@ -187,10 +187,10 @@ function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dic
             hr = HyperRectangle((lˣ,lʸ), (uˣ,uʸ))
             mlf = MultilinearFunction(hr, (a,b) -> a*b)
             disc_levelˣ = lˣ == uˣ ? 1 : default_disc_level # if variable is fixed, no need to discretize
-            disc_levelʸ = lʸ == uʸ ? 1 : default_disc_level
+            disc_levelʸ = lʸ == uʸ ? 1 : (method != :Logarithmic2D ? 2 : default_disc_level)
             # disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,disc_levelʸ))
-            disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,2))
-            z = outerapproximate(m, (t.qvars1[i],t.qvars2[i]), mlf, disc)
+            disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,disc_levelʸ))
+            z = outerapproximate(m, (t.qvars1[i],t.qvars2[i]), mlf, disc, method)
             product_dict[(x,y)] = z
             product_dict[(y,x)] = z
         end
