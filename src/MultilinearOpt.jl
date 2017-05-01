@@ -59,6 +59,8 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
                 # for j in 1:t
                     # JuMP.@constraint(m, sum(γ[v] for v in ))
                 # end
+            else
+                throw(ArgumentError("Unrecognized method: $method"))
             end
         end
     else
@@ -139,6 +141,8 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
                 z ≤ x*yˡ + (xˡ+a)*(y-yˡ) + sum(a*2^(nL-1)* Δy[nL]             for nL in 1:NL)
                 z ≤ x*yᵘ +  xˡ   *(y-yᵘ) + sum(a*2^(nL-1)*(Δy[nL]-(yᵘ-yˡ)*λ[nL]) for nL in 1:NL)
             end)
+        else
+            throw(ArgumentError("Unrecognized method: $method"))
         end
     end
     z
@@ -146,7 +150,7 @@ end
 
 const default_disc_level = 9
 
-function relaxbilinear!(m::JuMP.Model; method=:Logarithmic)
+function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D)
     # replace each bilinear term in (nonconvex) quadratic constraints with outer approx
     product_dict = Dict() #m.ext[:Multilinear].product_dict
     nonconvex = true # TODO: check this
