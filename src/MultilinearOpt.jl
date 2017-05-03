@@ -34,6 +34,7 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
     T = map(t -> mlf.f(t...), V)
     z = JuMP.@variable(m, basename="z")
     if vform
+        PiecewiseLinearOpt.initPWL!(m)
         λ = JuMP.@variable(m, [V], lowerbound=0, upperbound=1, basename="λ")
         JuMP.@constraint(m, sum(λ) == 1)
         for i in 1:r
@@ -43,22 +44,14 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
         for i in 1:r
             I = disc.d[i]
             n = length(I)-1
+            n > 1 || continue
             if method == :Logarithmic1D || method == :Logarithmic2D
                 JuMP.@expression(m, γ[j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
                 k = ceil(Int, log2(n))
-                H = PiecewiseLinearOpt.reflected_gray(k)
-                y = JuMP.@variable(m, [1:k], Bin, basename="y")
-                for j in 1:k
-                    JuMP.@constraints(m, begin
-                        H[1][j]*γ[1] + sum(min(H[v][j],H[v-1][j])*γ[v] for v in 2:n) + H[n][j]*γ[n+1] ≤ y[j]
-                        H[1][j]*γ[1] + sum(max(H[v][j],H[v-1][j])*γ[v] for v in 2:n) + H[n][j]*γ[n+1] ≥ y[j]
-                    end)
-                end
+                H = PiecewiseLinearOpt.reflected_gray_codes(k)
+                PiecewiseLinearOpt.sos2_logarthmic_formulation!(m, γ)
             elseif method == :Unary
-                y = JuMP.@variable(m, [1:t], Bin, basename="y")
-                # for j in 1:t
-                    # JuMP.@constraint(m, sum(γ[v] for v in ))
-                # end
+                PiecewiseLinearOpt.sos2_mc_formulation!(m, γ)
             else
                 throw(ArgumentError("Unrecognized method: $method"))
             end
