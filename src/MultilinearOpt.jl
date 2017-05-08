@@ -143,7 +143,7 @@ end
 
 const default_disc_level = 9
 
-function grammian(expr::GenericQuadExpr)
+function grammian(expr::JuMP.GenericQuadExpr)
     vars = unique([expr.qvars1; expr.qvars2])
     varindices = Dict((v, i) for (i, v) in enumerate(vars))
     n = length(vars)
@@ -157,8 +157,9 @@ function grammian(expr::GenericQuadExpr)
     grammian, vars
 end
 
-isconvex(::Any) = false # fallback; TODO: more methods
-isconvex(expr::GenericQuadExpr) = isposdef(first(grammian(expr)))
+isconvex(expr::Any) = error("Could not determine if expression is convex.")
+isconvex(expr::JuMP.GenericAffExpr) = true
+isconvex(expr::JuMP.GenericQuadExpr) = isposdef(first(grammian(expr)))
 
 function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D)
     # replace each bilinear term in (nonconvex) quadratic constraints with outer approx
