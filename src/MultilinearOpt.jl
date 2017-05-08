@@ -145,16 +145,16 @@ const default_disc_level = 9
 
 function gramian(expr::JuMP.GenericQuadExpr)
     vars = unique([expr.qvars1; expr.qvars2])
-    varindices = Dict((v, i) for (i, v) in enumerate(vars))
+    varindices = Dict(v => i for (i, v) in enumerate(vars))
     n = length(vars)
     T = eltype(expr.qcoeffs)
-    gramian = Symmetric(zeros(T, n, n))
+    gramian = zeros(T, n, n)
     for (var1, var2, coeff) in zip(expr.qvars1, expr.qvars2, expr.qcoeffs)
         ind1, ind2 = varindices[var1], varindices[var2]
-        gramian.data[ind1, ind2] = coeff
-        gramian.data[ind2, ind1] = coeff
+        row, col = extrema((ind1, ind2))
+        gramian[row, col] = coeff
     end
-    gramian, vars
+    Symmetric(gramian), vars
 end
 
 ispossemidef(mat) = all(eigvals(mat) .>= 0)
