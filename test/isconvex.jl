@@ -13,7 +13,7 @@
 
    # QuadExpr
    @test MultilinearOpt.isconvex(x^2)
-   @test MultilinearOpt.isconvex(x^2 + 0 * z^2) # test positive semidefinite Grammian
+   @test MultilinearOpt.isconvex(x^2 + 0 * z^2) # test positive semidefinite gramian
    @test MultilinearOpt.isconvex(x^2 + 3 * y - z + 5)
    @test !MultilinearOpt.isconvex(-x^2)
    @test !MultilinearOpt.isconvex(x + y - z ^2 + x^2 + y^2)
