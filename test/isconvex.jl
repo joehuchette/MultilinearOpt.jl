@@ -20,4 +20,22 @@
    G = G * G'
    vars = [x; y; z]
    @test MultilinearOpt.isconvex(dot(vars, G * vars))
+
+   # LinearConstraint
+   @test MultilinearOpt.isconvex(JuMP.LinearConstraint(JuMP.@constraint(m, x + 3 * y == 0)))
+   @test MultilinearOpt.isconvex(JuMP.LinearConstraint(JuMP.@constraint(m, 2 * x - y >= z)))
+   @test MultilinearOpt.isconvex(JuMP.LinearConstraint(JuMP.@constraint(m, 2 * x - y <= z)))
+
+   # QuadConstr
+   JuMP.@constraint(m, x == y * z)
+   @test !MultilinearOpt.isconvex(m.quadconstr[end])
+
+   JuMP.@constraint(m, x^2 + y^2 <= z)
+   @test MultilinearOpt.isconvex(m.quadconstr[end])
+
+   JuMP.@constraint(m, x^2 + y^2 <= z^2)
+   @test !MultilinearOpt.isconvex(m.quadconstr[end])
+
+   JuMP.@constraint(m, -x^2 - y^2 >= -z)
+   @test MultilinearOpt.isconvex(m.quadconstr[end])
 end

@@ -157,9 +157,23 @@ function grammian(expr::JuMP.GenericQuadExpr)
     grammian, vars
 end
 
-isconvex(expr::Any) = error("Could not determine if expression is convex.")
+isconcave(x) = isconvex(-x)
+isconvex(x) = error("Could not determine convexity.")
 isconvex(expr::JuMP.GenericAffExpr) = true
 isconvex(expr::JuMP.GenericQuadExpr) = isposdef(first(grammian(expr)))
+isconvex(constr::JuMP.LinearConstraint) = true
+function isconvex(constr::JuMP.GenericQuadConstraint)
+    if constr.sense == :(<=)
+        convex = isconvex(constr.terms)
+    elseif constr.sense == :(>=)
+        convex = isconcave(constr.terms)
+    elseif constr.sense == :(==)
+        convex = all(constr.terms.qcoeffs .== 0)
+    else
+        error("Sense $(constr.sense) not recognized")
+    end
+    convex
+end
 
 function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D)
     # replace each bilinear term in (nonconvex) quadratic constraints with outer approx
