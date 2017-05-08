@@ -148,19 +148,20 @@ function grammian(expr::JuMP.GenericQuadExpr)
     varindices = Dict((v, i) for (i, v) in enumerate(vars))
     n = length(vars)
     T = eltype(expr.qcoeffs)
-    grammian = spzeros(T, n, n)
+    grammian = Symmetric(zeros(T, n, n))
     for (var1, var2, coeff) in zip(expr.qvars1, expr.qvars2, expr.qcoeffs)
         ind1, ind2 = varindices[var1], varindices[var2]
-        grammian[ind1, ind2] = coeff
-        grammian[ind2, ind1] = coeff
+        grammian.data[ind1, ind2] = coeff
+        grammian.data[ind2, ind1] = coeff
     end
     grammian, vars
 end
 
+ispossemidef(mat) = all(eigvals(mat) .>= 0)
 isconcave(x) = isconvex(-x)
 isconvex(x) = error("Could not determine convexity.")
 isconvex(expr::JuMP.GenericAffExpr) = true
-isconvex(expr::JuMP.GenericQuadExpr) = isposdef(first(grammian(expr)))
+isconvex(expr::JuMP.GenericQuadExpr) = ispossemidef(first(grammian(expr)))
 isconvex(constr::JuMP.LinearConstraint) = true
 function isconvex(constr::JuMP.GenericQuadConstraint)
     if constr.sense == :(<=)
