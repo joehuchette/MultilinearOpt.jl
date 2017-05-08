@@ -143,17 +143,32 @@ end
 
 const default_disc_level = 9
 
+function grammian(expr::GenericQuadExpr)
+    vars = unique([expr.qvars1; expr.qvars2])
+    varindices = Dict((v, i) for (i, v) in enumerate(vars))
+    n = length(vars)
+    T = eltype(expr.qcoeffs)
+    grammian = spzeros(T, n, n)
+    for (var1, var2, coeff) in zip(expr.qvars1, expr.qvars2, expr.qcoeffs)
+        ind1, ind2 = varindices[var1], varindices[var2]
+        grammian[ind1, ind2] = coeff
+        grammian[ind2, ind1] = coeff
+    end
+    grammian, vars
+end
+
+isconvex(::Any) = false # fallback; TODO: more methods
+isconvex(expr::GenericQuadExpr) = isposdef(first(grammian(expr)))
+
 function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D)
     # replace each bilinear term in (nonconvex) quadratic constraints with outer approx
     product_dict = Dict() #m.ext[:Multilinear].product_dict
-    nonconvex = true # TODO: check this
-    if nonconvex
+    if !isconvex(m.obj)
         aff = linearize_quadratic!(m, m.obj, product_dict, method)
         m.obj = JuMP.QuadExpr(aff)
     end
     for q in m.quadconstr
-        nonconvex = true # TODO: check this and preserve convex quadratics
-        if nonconvex
+        if !isconvex(q)
             # TODO: merge terms (i.e. x*y + 2x*y = 3x*y)
             t = q.terms
             aff = linearize_quadratic!(m, t, product_dict, method)
