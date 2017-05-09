@@ -143,17 +143,48 @@ end
 
 const default_disc_level = 9
 
+function gramian(expr::JuMP.GenericQuadExpr)
+    vars = unique([expr.qvars1; expr.qvars2])
+    varindices = Dict(v => i for (i, v) in enumerate(vars))
+    n = length(vars)
+    T = eltype(expr.qcoeffs)
+    gramian = zeros(T, n, n)
+    for (var1, var2, coeff) in zip(expr.qvars1, expr.qvars2, expr.qcoeffs)
+        ind1, ind2 = varindices[var1], varindices[var2]
+        row, col = extrema((ind1, ind2))
+        gramian[row, col] = coeff
+    end
+    Symmetric(gramian), vars
+end
+
+ispossemidef(mat) = all(eigvals(mat) .>= 0)
+isconcave(x) = isconvex(-x)
+isconvex(x) = error("Could not determine convexity.")
+isconvex(expr::JuMP.GenericAffExpr) = true
+isconvex(expr::JuMP.GenericQuadExpr) = ispossemidef(first(gramian(expr)))
+isconvex(constr::JuMP.LinearConstraint) = true
+function isconvex(constr::JuMP.GenericQuadConstraint)
+    if constr.sense == :(<=)
+        convex = isconvex(constr.terms)
+    elseif constr.sense == :(>=)
+        convex = isconcave(constr.terms)
+    elseif constr.sense == :(==)
+        convex = all(constr.terms.qcoeffs .== 0)
+    else
+        error("Sense $(constr.sense) not recognized")
+    end
+    convex
+end
+
 function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D)
     # replace each bilinear term in (nonconvex) quadratic constraints with outer approx
     product_dict = Dict() #m.ext[:Multilinear].product_dict
-    nonconvex = true # TODO: check this
-    if nonconvex
+    if !isconvex(m.obj)
         aff = linearize_quadratic!(m, m.obj, product_dict, method)
         m.obj = JuMP.QuadExpr(aff)
     end
     for q in m.quadconstr
-        nonconvex = true # TODO: check this and preserve convex quadratics
-        if nonconvex
+        if !isconvex(q)
             # TODO: merge terms (i.e. x*y + 2x*y = 3x*y)
             t = q.terms
             aff = linearize_quadratic!(m, t, product_dict, method)
