@@ -157,7 +157,7 @@ function gramian(expr::JuMP.GenericQuadExpr)
     Symmetric(gramian), vars
 end
 
-ispossemidef(mat) = all(eigvals(mat) .>= 0)
+ispossemidef(mat) = all(eigvals(mat) .>= -1e-10)
 isconcave(x) = isconvex(-x)
 isconvex(x) = error("Could not determine convexity.")
 isconvex(expr::JuMP.GenericAffExpr) = true
