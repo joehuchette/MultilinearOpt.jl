@@ -141,8 +141,6 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
     z
 end
 
-const default_disc_level = 9
-
 function gramian(expr::JuMP.GenericQuadExpr)
     vars = unique([expr.qvars1; expr.qvars2])
     varindices = Dict(v => i for (i, v) in enumerate(vars))
@@ -176,18 +174,18 @@ function isconvex(constr::JuMP.GenericQuadConstraint)
     convex
 end
 
-function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D)
+function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D, disc_level::Int = 9)
     # replace each bilinear term in (nonconvex) quadratic constraints with outer approx
     product_dict = Dict() #m.ext[:Multilinear].product_dict
     if !isconvex(m.obj)
-        aff = linearize_quadratic!(m, m.obj, product_dict, method)
+        aff = linearize_quadratic!(m, m.obj, product_dict, method, disc_level)
         m.obj = JuMP.QuadExpr(aff)
     end
     for q in m.quadconstr
         if !isconvex(q)
             # TODO: merge terms (i.e. x*y + 2x*y = 3x*y)
             t = q.terms
-            aff = linearize_quadratic!(m, t, product_dict, method)
+            aff = linearize_quadratic!(m, t, product_dict, method, disc_level)
             lb = q.sense == :<= ? -Inf : -aff.constant
             ub = q.sense == :>= ?  Inf : -aff.constant
             aff.constant = 0
@@ -199,7 +197,7 @@ function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D)
     nothing
 end
 
-function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dict, method)
+function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dict, method::Symbol, disc_level::Int)
     aff = copy(t.aff)
     for i in 1:length(t.qvars1)
         x, y = t.qvars1[i], t.qvars2[i]
@@ -214,8 +212,8 @@ function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dic
             @assert isfinite(lˣ) && isfinite(lʸ) && isfinite(uˣ) && isfinite(uʸ)
             hr = HyperRectangle((lˣ,lʸ), (uˣ,uʸ))
             mlf = MultilinearFunction(hr, (a,b) -> a*b)
-            disc_levelˣ = lˣ == uˣ ? 1 : default_disc_level # if variable is fixed, no need to discretize
-            disc_levelʸ = lʸ == uʸ ? 1 : (method != :Logarithmic2D ? 2 : default_disc_level)
+            disc_levelˣ = lˣ == uˣ ? 1 : disc_level # if variable is fixed, no need to discretize
+            disc_levelʸ = lʸ == uʸ ? 1 : (method != :Logarithmic2D ? 2 : disc_level)
             # disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,disc_levelʸ))
             disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,disc_levelʸ))
             z = outerapproximate(m, (t.qvars1[i],t.qvars2[i]), mlf, disc, method)
