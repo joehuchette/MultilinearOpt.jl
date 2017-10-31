@@ -27,7 +27,7 @@ type MultilinearData
 end
 
 function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::MultilinearFunction{D}, disc::Discretization, method)
-    vform = (method in (:Logarithmic1D,:Logarithmic2D,:Unary))
+    vform = (method in (:Logarithmic1D,:Logarithmic2D,:ZigZag1D,:ZigZag2D,:Unary))
     r = length(disc.d)
     @assert r == 2
     V = collect(Base.product(disc.d...))
@@ -47,11 +47,12 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
             n > 1 || continue
             if method == :Logarithmic1D || method == :Logarithmic2D
                 JuMP.@expression(m, γ[j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
-                k = ceil(Int, log2(n))
-                H = PiecewiseLinearOpt.reflected_gray_codes(k)
                 PiecewiseLinearOpt.sos2_logarthmic_formulation!(m, γ)
             elseif method == :Unary
                 PiecewiseLinearOpt.sos2_mc_formulation!(m, γ)
+            elseif method == :ZigZag1D || method == :ZigZag2D
+                JuMP.@expression(m, γ[j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
+                PiecewiseLinearOpt.sos2_zigzag_general_integer_formulation!(m, γ)
             else
                 throw(ArgumentError("Unrecognized method: $method"))
             end
@@ -213,7 +214,7 @@ function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dic
             hr = HyperRectangle((lˣ,lʸ), (uˣ,uʸ))
             mlf = MultilinearFunction(hr, (a,b) -> a*b)
             disc_levelˣ = lˣ == uˣ ? 1 : disc_level # if variable is fixed, no need to discretize
-            disc_levelʸ = lʸ == uʸ ? 1 : (method != :Logarithmic2D ? 2 : disc_level)
+            disc_levelʸ = lʸ == uʸ ? 1 : (!(method in (:Logarithmic2D,:ZigZag2D)) ? 2 : disc_level)
             # disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,disc_levelʸ))
             disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,disc_levelʸ))
             z = outerapproximate(m, (t.qvars1[i],t.qvars2[i]), mlf, disc, method)

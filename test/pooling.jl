@@ -1,4 +1,4 @@
-using MultilinearOpt, JuMP
+using MultilinearOpt, JuMP, Gurobi
 
 N = 1:11
 S = 1:5
@@ -38,7 +38,7 @@ q = [1.00    6.00    4.00    0.50
 
 b = [75,75,75,75,75,75,75,10,25,30,10]
 
-m = Model()
+m = Model(solver=GurobiSolver())
 @variable(m, 0 ≤ f[i in N, j in N; (i,j) in A] ≤ maximum(b))
 for i in N
     if i in S
@@ -59,5 +59,5 @@ end
 
 @objective(m, Min, sum(c[i,j]*f[i,j] for (i,j) in A))
 
-relaxbilinear!(m)
+relaxbilinear!(m, method=:Logarithmic2D)
 stat = solve(m)

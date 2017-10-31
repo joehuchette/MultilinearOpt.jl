@@ -1,5 +1,5 @@
 using LightXML
-using JuMP, MultilinearOpt, BARON, Gurobi
+using JuMP, MultilinearOpt, BARON, Gurobi, CPLEX
 
 type Feed
     id::String
@@ -56,7 +56,7 @@ function pooling_problem(I, J, L, K, conns)
     Ty(l,j) = (l.id,j.id) in pairs
     Tz(i,j) = (i.id,j.id) in pairs
 
-    m = Model(solver=GurobiSolver())
+    m = Model(solver=CplexSolver())
     @variable(m, 0 ≤ q[i in I, l in L] ≤ (Tx(i,l) ? 1 : Inf))
     @variable(m, 0 ≤ y[l in L, j in J] ≤ min(SS(l), DU(j), sum(AU(i) for i in I if Tx(i,l))))
     @variable(m, 0 ≤ z[i in I, j in J] ≤ min(AU(i), DU(j)))
@@ -115,9 +115,9 @@ function pooling_problem(I, J, L, K, conns)
     m
 end
 
-filebase = "/Users/huchette/Downloads/sample_problems/sample_problems/standard_lit_problems"
+filebase = "/Users/huchette/Dropbox\ (MIT)/research/multilinear_relaxations/sample_problems/sample_problems/standard_lit_problems"
 
-fp = open("pooling_results.csv", "w")
+fp = open("/Users/huchette/Dropbox\ (MIT)/research/multilinear_relaxations/pooling_results.csv", "w")
 
 for (roots, dirs, files) in walkdir(filebase), filename in files
     fi = joinpath(filebase,filename)
@@ -168,38 +168,52 @@ for (roots, dirs, files) in walkdir(filebase), filename in files
 
     # MisenerLinear
     m1 = pooling_problem(feeds, prods, pools, quals, conns)
-    relaxbilinear!(m1, method=:MisenerLinear)
+    relaxbilinear!(m1, method=:MisenerLinear, disc_level=33)
     t1 = @elapsed solve(m1)
     obj1 = getobjectivevalue(m1)
     println(fp, "$filename, MisenerLinear, $t1, $obj1")
 
     # MisenerLog1
     m2 = pooling_problem(feeds, prods, pools, quals, conns)
-    relaxbilinear!(m2, method=:MisenerLog1)
+    relaxbilinear!(m2, method=:MisenerLog1, disc_level=33)
     t2 = @elapsed solve(m2)
     obj2 = getobjectivevalue(m2)
     println(fp, "$filename, MisenerLog1, $t2, $obj2")
 
     # MisenerLog2
     m3 = pooling_problem(feeds, prods, pools, quals, conns)
-    relaxbilinear!(m3, method=:MisenerLog2)
+    relaxbilinear!(m3, method=:MisenerLog2, disc_level=33)
     t3 = @elapsed solve(m3)
     obj3 = getobjectivevalue(m3)
     println(fp, "$filename, MisenerLog2, $t3, $obj3")
 
     # Logarithmic 1D
     m4 = pooling_problem(feeds, prods, pools, quals, conns)
-    relaxbilinear!(m4, method=:Logarithmic1D)
+    relaxbilinear!(m4, method=:Logarithmic1D, disc_level=33)
     t4 = @elapsed solve(m4)
     obj4 = getobjectivevalue(m4)
     println(fp, "$filename, Logarithmic1D, $t4, $obj4")
 
     # Logarithmic 2D
     m5 = pooling_problem(feeds, prods, pools, quals, conns)
-    relaxbilinear!(m5, method=:Logarithmic2D)
+    relaxbilinear!(m5, method=:Logarithmic2D, disc_level=33)
     t5 = @elapsed solve(m5)
     obj5 = getobjectivevalue(m5)
     println(fp, "$filename, Logarithmic2D, $t5, $obj5")
+
+    # ZigZag 1D
+    m6 = pooling_problem(feeds, prods, pools, quals, conns)
+    relaxbilinear!(m6, method=:ZigZag1D, disc_level=33)
+    t6 = @elapsed solve(m6)
+    obj6 = getobjectivevalue(m6)
+    println(fp, "$filename, ZigZag1D, $t6, $obj6")
+
+    # ZigZag 2D
+    m7 = pooling_problem(feeds, prods, pools, quals, conns)
+    relaxbilinear!(m7, method=:ZigZag2D, disc_level=33)
+    t7 = @elapsed solve(m7)
+    obj7 = getobjectivevalue(m7)
+    println(fp, "$filename, ZigZag2D, $t7, $obj7")
 
     flush(fp)
 end
