@@ -155,7 +155,7 @@ function gramian(expr::JuMP.GenericQuadExpr{T}) where T
     for (coeff, var1, var2) in JuMP.quad_terms(expr)
         ind1, ind2 = varindices[var1], varindices[var2]
         row, col = extrema((ind1, ind2))
-        gramian[row, col] = row == col ? coeff : coeff / 2
+        gramian[row, col] += row == col ? coeff : coeff / 2
     end
     Symmetric(gramian), vars
 end
@@ -243,7 +243,7 @@ function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dic
             disc = Discretization(range(lˣ, stop=uˣ, length=disc_levelˣ),  range(lʸ, stop=uʸ, length=disc_levelʸ))
             outerapproximate(m, (x, y), mlf, disc, method)
         end
-        JuMP.add_to_expression!(aff, coeff * z)
+        JuMP.add_to_expression!(aff, coeff / 2 * z)
     end
     aff
 end
