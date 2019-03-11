@@ -1,3 +1,4 @@
-julia 0.5
-JuMP 0.14
+julia 0.7
+JuMP 0.19
+MathOptInterface
 PiecewiseLinearOpt

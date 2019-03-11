@@ -1,7 +1,9 @@
 using MultilinearOpt
-using Base.Test
+using JuMP
+using LinearAlgebra
+using Test
 
 include("isconvex.jl")
-
-# write your own tests here
-@test 1 == 2
+# include("adhya1.jl")
+# include("pooling_infra.jl")
+# include("pooling.jl")

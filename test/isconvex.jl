@@ -19,24 +19,24 @@
    @test !MultilinearOpt.isconvex(x + y - z ^2 + x^2 + y^2)
    G = rand(3, 3)
    G = G * G'
-   vars = [x; y; z]
-   @test MultilinearOpt.isconvex(dot(vars, G * vars))
+   vars = [x, y, z]
+   expr = dot(vars, G * vars)
+   G_back, vars_back = MultilinearOpt.gramian(expr)
+   @test vars_back == vars
+   @test G_back ≈ G atol=1e-10
+   @test MultilinearOpt.isconvex(expr)
 
    # LinearConstraint
-   @test MultilinearOpt.isconvex(JuMP.LinearConstraint(JuMP.@constraint(m, x + 3 * y == 0)))
-   @test MultilinearOpt.isconvex(JuMP.LinearConstraint(JuMP.@constraint(m, 2 * x - y >= z)))
-   @test MultilinearOpt.isconvex(JuMP.LinearConstraint(JuMP.@constraint(m, 2 * x - y <= z)))
+   @test MultilinearOpt.isconvex(JuMP.constraint_object(JuMP.@constraint(m, x + 3 * y == 0)))
+   @test MultilinearOpt.isconvex(JuMP.constraint_object(JuMP.@constraint(m, 2 * x - y >= z)))
+   @test MultilinearOpt.isconvex(JuMP.constraint_object(JuMP.@constraint(m, 2 * x - y <= z)))
 
    # QuadConstr
-   JuMP.@constraint(m, x == y * z)
-   @test !MultilinearOpt.isconvex(m.quadconstr[end])
+   @test !MultilinearOpt.isconvex(JuMP.constraint_object(JuMP.@constraint(m, x == y * z)))
 
-   JuMP.@constraint(m, x^2 + y^2 <= z)
-   @test MultilinearOpt.isconvex(m.quadconstr[end])
+   @test MultilinearOpt.isconvex(JuMP.constraint_object(JuMP.@constraint(m, x^2 + y^2 <= z)))
 
-   JuMP.@constraint(m, x^2 + y^2 <= z^2)
-   @test !MultilinearOpt.isconvex(m.quadconstr[end])
+   @test !MultilinearOpt.isconvex(JuMP.constraint_object(JuMP.@constraint(m, x^2 + y^2 <= z^2)))
 
-   JuMP.@constraint(m, -x^2 - y^2 >= -z)
-   @test MultilinearOpt.isconvex(m.quadconstr[end])
+   @test MultilinearOpt.isconvex(JuMP.constraint_object(JuMP.@constraint(m, -x^2 - y^2 >= -z)))
 end
