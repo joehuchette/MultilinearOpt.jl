@@ -26,9 +26,9 @@ end
 Discretization(d...) = Discretization(map(t->convert(Vector{Float64},t), d))
 
 mutable struct MultilinearData
-    product_dict::Dict{Tuple{JuMP.VariableRef,JuMP.VariableRef},JuMP.VariableRef}
+    product_dict::Dict{JuMP.UnorderedPair{JuMP.VariableRef}, JuMP.VariableRef}
 
-    MultilinearData() = new(Dict{Tuple{JuMP.VariableRef,JuMP.VariableRef},JuMP.VariableRef}())
+    MultilinearData() = new(Dict{JuMP.UnorderedPair{JuMP.VariableRef}, JuMP.VariableRef}())
 end
 
 function outerapproximate(m::JuMP.Model, x::NTuple{D,JuMP.VariableRef}, mlf::MultilinearFunction{D}, disc::Discretization, method) where {D}
@@ -183,8 +183,10 @@ function isconvex(constr::JuMP.ScalarConstraint)
             return isconvex(-f)
         elseif isfinite(l) && isfinite(u)
             return all(iszero, coeff for (coeff, _, _) in JuMP.quad_terms(f))
+        elseif l == -Inf && u == Inf
+            return true
         else
-            error("Set type $(typeof(set)) not recognized.")
+            error("Should never get here.")
         end
     else
         error("Function type $(typeof(f)) not recognized.")
@@ -193,13 +195,13 @@ end
 
 function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D, disc_level::Int = 9)
     # replace each bilinear term in (nonconvex) quadratic constraints with outer approx
-    product_dict = Dict() #m.ext[:Multilinear].product_dict
+    product_dict = Dict{JuMP.UnorderedPair{JuMP.VariableRef}, JuMP.VariableRef}() #m.ext[:Multilinear].product_dict
     obj = JuMP.objective_function(m)
     if !isconvex(obj)
         aff = linearize_quadratic!(m, obj, product_dict, method, disc_level)
         JuMP.set_objective_function(m, JuMP.QuadExpr(aff))
     end
-    linearized_quad_constraints = JuMP.ConstraintRef[]
+    linearized_quad_constrs = JuMP.ConstraintRef[]
     for (F, S) in JuMP.list_of_constraint_types(m)
         if F <: JuMP.GenericQuadExpr
             for constr in JuMP.all_constraints(m, F, S)
@@ -207,20 +209,20 @@ function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D, disc_level::Int = 
                 if !isconvex(q)
                     # TODO: merge terms (i.e. x*y + 2x*y = 3x*y) (use MOIU.canonical, rewrite linearize_quadratic! in terms of MOI.ScalarQuadraticFunction)
                     f = JuMP.jump_function(q)
-                    set = JuMP.moi_set(q)
                     aff = linearize_quadratic!(m, f, product_dict, method, disc_level)
+                    set = JuMP.moi_set(q)
                     interval = MOI.Interval(set)
                     lb = interval.lower - JuMP.constant(aff)
                     ub = interval.upper - JuMP.constant(aff)
                     aff.constant = 0
                     JuMP.@constraint(m, lb <= aff <= ub)
-                    push!(linearized_quad_constraints, constr)
+                    push!(linearized_quad_constrs, constr)
                 end
             end
         end
     end
-    for cosntr in linearized_quad_constraints
-        JuMP.delete(m, cosntr)
+    for constr in linearized_quad_constrs
+        JuMP.delete(m, constr)
     end
     nothing
 end
@@ -228,11 +230,7 @@ end
 function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dict, method::Symbol, disc_level::Int)
     aff = copy(t.aff)
     for (coeff, x, y) in JuMP.quad_terms(t)
-        if haskey(product_dict, (x, y))
-            z = product_dict[(x,y)]
-        elseif haskey(product_dict, (y, x)) # should be unnecessary branch
-            z = product_dict[(y,x)]
-        else
+        z = get!(product_dict, JuMP.UnorderedPair(x, y)) do
             @assert x != y # TODO: support non-bilinear terms
             lˣ, lʸ = JuMP.lower_bound(x), JuMP.lower_bound(y)
             uˣ, uʸ = JuMP.upper_bound(x), JuMP.upper_bound(y)
@@ -243,9 +241,7 @@ function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dic
             disc_levelʸ = lʸ == uʸ ? 1 : (!(method in (:Logarithmic2D,:ZigZag2D)) ? 2 : disc_level)
             # disc = Discretization(range(lˣ, stop=uˣ, length=disc_levelˣ),  range(lʸ, stop=uʸ, length=disc_levelʸ))
             disc = Discretization(range(lˣ, stop=uˣ, length=disc_levelˣ),  range(lʸ, stop=uʸ, length=disc_levelʸ))
-            z = outerapproximate(m, (x, y), mlf, disc, method)
-            product_dict[(x,y)] = z
-            product_dict[(y,x)] = z
+            outerapproximate(m, (x, y), mlf, disc, method)
         end
         JuMP.add_to_expression!(aff, coeff * z)
     end
