@@ -50,13 +50,12 @@ function outerapproximate(m::JuMP.Model, x::NTuple{D,JuMP.VariableRef}, mlf::Mul
             I = disc.d[i]
             n = length(I)-1
             n > 1 || continue
+            γ = JuMP.@expression(m, [j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
             if method == :Logarithmic1D || method == :Logarithmic2D
-                γ = JuMP.@expression(m, [j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
                 PiecewiseLinearOpt.sos2_logarithmic_formulation!(m, γ)
             elseif method == :Unary
                 PiecewiseLinearOpt.sos2_mc_formulation!(m, γ) # TODO: where's γ supposed to come from?
             elseif method == :ZigZag1D || method == :ZigZag2D
-                γ = JuMP.@expression(m, [j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
                 PiecewiseLinearOpt.sos2_zigzag_general_integer_formulation!(m, γ)
             else
                 throw(ArgumentError("Unrecognized method: $method"))
@@ -199,7 +198,7 @@ function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D, disc_level::Int = 
     obj = JuMP.objective_function(m)
     if !isconvex(obj)
         aff = linearize_quadratic!(m, obj, product_dict, method, disc_level)
-        JuMP.set_objective_function(m, JuMP.QuadExpr(aff))
+        JuMP.set_objective_function(m, aff)
     end
     linearized_quad_constrs = JuMP.ConstraintRef[]
     for (F, S) in JuMP.list_of_constraint_types(m)
