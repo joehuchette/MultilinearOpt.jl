@@ -1,41 +1,46 @@
 module MultilinearOpt
 
-import JuMP, PiecewiseLinearOpt
+import JuMP, MathOptInterface, PiecewiseLinearOpt
+
+using LinearAlgebra: Symmetric, eigvals
 
 export HyperRectangle, MultilinearFunction, Discretization, outerapproximate, relaxbilinear!
 
-immutable HyperRectangle{D}
+const MOI = MathOptInterface
+const MOIU = MOI.Utilities
+
+struct HyperRectangle{D}
     l::NTuple{D,Float64}
     u::NTuple{D,Float64}
 end
 
-type MultilinearFunction{D}
+mutable struct MultilinearFunction{D}
     bounds::HyperRectangle{D}
     f::Function
 end
 (mlf::MultilinearFunction)(args...) = mlf.f(args...)
 
-type Discretization{D}
+mutable struct Discretization{D}
     d::NTuple{D,Vector{Float64}}
 end
 Discretization(d...) = Discretization(map(t->convert(Vector{Float64},t), d))
 
-type MultilinearData
-    product_dict::Dict{Tuple{JuMP.Variable,JuMP.Variable},JuMP.Variable}
+mutable struct MultilinearData
+    product_dict::Dict{JuMP.UnorderedPair{JuMP.VariableRef}, JuMP.VariableRef}
 
-    MultilinearData() = new(Dict{Tuple{JuMP.Variable,JuMP.Variable},JuMP.Variable}())
+    MultilinearData() = new(Dict{JuMP.UnorderedPair{JuMP.VariableRef}, JuMP.VariableRef}())
 end
 
-function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::MultilinearFunction{D}, disc::Discretization, method)
+function outerapproximate(m::JuMP.Model, x::NTuple{D,JuMP.VariableRef}, mlf::MultilinearFunction{D}, disc::Discretization, method) where {D}
     vform = (method in (:Logarithmic1D,:Logarithmic2D,:ZigZag1D,:ZigZag2D,:Unary))
     r = length(disc.d)
     @assert r == 2
     V = collect(Base.product(disc.d...))
     T = map(t -> mlf.f(t...), V)
-    z = JuMP.@variable(m, basename="z")
+    z = JuMP.@variable(m, base_name="z")
     if vform
         PiecewiseLinearOpt.initPWL!(m)
-        λ = JuMP.@variable(m, [V], lowerbound=0, upperbound=1, basename="λ")
+        λ = JuMP.@variable(m, [V], lower_bound=0, upper_bound=1, base_name="λ")
         JuMP.@constraint(m, sum(λ) == 1)
         for i in 1:r
             JuMP.@constraint(m, sum(λ[v]*v[i] for v in V) == x[i])
@@ -45,13 +50,12 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
             I = disc.d[i]
             n = length(I)-1
             n > 1 || continue
+            γ = JuMP.@expression(m, [j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
             if method == :Logarithmic1D || method == :Logarithmic2D
-                JuMP.@expression(m, γ[j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
-                PiecewiseLinearOpt.sos2_logarthmic_formulation!(m, γ)
+                PiecewiseLinearOpt.sos2_logarithmic_formulation!(m, γ)
             elseif method == :Unary
-                PiecewiseLinearOpt.sos2_mc_formulation!(m, γ)
+                PiecewiseLinearOpt.sos2_mc_formulation!(m, γ) # TODO: where's γ supposed to come from?
             elseif method == :ZigZag1D || method == :ZigZag2D
-                JuMP.@expression(m, γ[j=1:(n+1)], sum(λ[v] for v in V if v[i] == I[j]))
                 PiecewiseLinearOpt.sos2_zigzag_general_integer_formulation!(m, γ)
             else
                 throw(ArgumentError("Unrecognized method: $method"))
@@ -70,7 +74,7 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
         x, y = x[iˣ], x[iʸ]
         if method == :MisenerLinear
             λ  = JuMP.@variable(m, [1:NP], Bin)
-            Δy = JuMP.@variable(m, [1:NP], lowerbound=0, upperbound=yᵘ-yˡ)
+            Δy = JuMP.@variable(m, [1:NP], lower_bound=0, upper_bound=yᵘ-yˡ)
             JuMP.@constraint(m, sum(λ) == 1)
             JuMP.@constraints(m, begin
                 xˡ + sum(a*(nP-1)*λ[nP] for nP in 1:NP) ≤ x
@@ -89,8 +93,8 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
         elseif method == :MisenerLog1
             NL = ceil(Int, log2(NP))
             λ    = JuMP.@variable(m, [1:NL], Bin)
-            Δy   = JuMP.@variable(m, [1:NP], lowerbound=0, upperbound=yᵘ-yˡ)
-            λhat = JuMP.@variable(m, [1:NP], lowerbound=0, upperbound=1)
+            Δy   = JuMP.@variable(m, [1:NP], lower_bound=0, upper_bound=yᵘ-yˡ)
+            λhat = JuMP.@variable(m, [1:NP], lower_bound=0, upper_bound=1)
             JuMP.@constraints(m, begin
                 xˡ + sum(2^(NL-nL)*a*λ[nL] for nL in 1:NL)     ≤ x
                 xˡ + sum(2^(NL-nL)*a*λ[nL] for nL in 1:NL) + a ≥ x
@@ -115,8 +119,8 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
         elseif method == :MisenerLog2
             NL = ceil(Int, log2(NP))
             λ  = JuMP.@variable(m, [1:NL], Bin)
-            Δy = JuMP.@variable(m, [1:NL], lowerbound=0, upperbound=yᵘ-yˡ)
-            s  = JuMP.@variable(m, [1:NL], lowerbound=0, upperbound=yᵘ-yˡ)
+            Δy = JuMP.@variable(m, [1:NL], lower_bound=0, upper_bound=yᵘ-yˡ)
+            s  = JuMP.@variable(m, [1:NL], lower_bound=0, upper_bound=yᵘ-yˡ)
             JuMP.@constraints(m, begin
                 xˡ +     sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≤ x
                 xˡ + a + sum(2^(nL-1)*a*λ[nL] for nL in 1:NL) ≥ x
@@ -142,86 +146,103 @@ function outerapproximate{D}(m::JuMP.Model, x::NTuple{D,JuMP.Variable}, mlf::Mul
     z
 end
 
-function gramian(expr::JuMP.GenericQuadExpr)
-    vars = unique([expr.qvars1; expr.qvars2])
+function gramian(expr::JuMP.GenericQuadExpr{T}) where T
+    vars = unique(Iterators.flatten((var1, var2) for (coeff, var1, var2) in JuMP.quad_terms(expr)))
     varindices = Dict(v => i for (i, v) in enumerate(vars))
     n = length(vars)
-    T = eltype(expr.qcoeffs)
     gramian = zeros(T, n, n)
-    for (var1, var2, coeff) in zip(expr.qvars1, expr.qvars2, expr.qcoeffs)
+    for (coeff, var1, var2) in JuMP.quad_terms(expr)
         ind1, ind2 = varindices[var1], varindices[var2]
         row, col = extrema((ind1, ind2))
-        gramian[row, col] = coeff
+        gramian[row, col] += row == col ? coeff : coeff / 2
     end
     Symmetric(gramian), vars
 end
 
 ispossemidef(mat) = all(eigvals(mat) .>= -1e-10)
-isconcave(x) = isconvex(-x)
 isconvex(x) = error("Could not determine convexity.")
 isconvex(expr::JuMP.GenericAffExpr) = true
 isconvex(expr::JuMP.GenericQuadExpr) = ispossemidef(first(gramian(expr)))
-isconvex(constr::JuMP.LinearConstraint) = true
-function isconvex(constr::JuMP.GenericQuadConstraint)
-    if constr.sense == :(<=)
-        convex = isconvex(constr.terms)
-    elseif constr.sense == :(>=)
-        convex = isconcave(constr.terms)
-    elseif constr.sense == :(==)
-        convex = all(constr.terms.qcoeffs .== 0)
+isconvex(set::MOI.LessThan) = true
+isconvex(set::MOI.GreaterThan) = true
+isconvex(set::MOI.EqualTo) = true
+isconvex(set::MOI.Interval) = true
+
+function isconvex(constr::JuMP.ScalarConstraint)
+    f = JuMP.jump_function(constr)
+    set = JuMP.moi_set(constr)
+    if f isa JuMP.GenericAffExpr
+        return isconvex(set)
+    elseif f isa JuMP.GenericQuadExpr
+        interval = MOI.Interval(set)
+        l, u = interval.lower, interval.upper
+        if l == -Inf && isfinite(u)
+            return isconvex(f)
+        elseif isfinite(l) && u == Inf
+            return isconvex(-f)
+        elseif isfinite(l) && isfinite(u)
+            return all(iszero, coeff for (coeff, _, _) in JuMP.quad_terms(f))
+        elseif l == -Inf && u == Inf
+            return true
+        else
+            error("Should never get here.")
+        end
     else
-        error("Sense $(constr.sense) not recognized")
+        error("Function type $(typeof(f)) not recognized.")
     end
-    convex
 end
 
 function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D, disc_level::Int = 9)
     # replace each bilinear term in (nonconvex) quadratic constraints with outer approx
-    product_dict = Dict() #m.ext[:Multilinear].product_dict
-    if !isconvex(m.obj)
-        aff = linearize_quadratic!(m, m.obj, product_dict, method, disc_level)
-        m.obj = JuMP.QuadExpr(aff)
+    product_dict = Dict{JuMP.UnorderedPair{JuMP.VariableRef}, JuMP.VariableRef}() #m.ext[:Multilinear].product_dict
+    obj = JuMP.objective_function(m)
+    if !isconvex(obj)
+        aff = linearize_quadratic!(m, obj, product_dict, method, disc_level)
+        JuMP.set_objective_function(m, aff)
     end
-    for q in m.quadconstr
-        if !isconvex(q)
-            # TODO: merge terms (i.e. x*y + 2x*y = 3x*y)
-            t = q.terms
-            aff = linearize_quadratic!(m, t, product_dict, method, disc_level)
-            lb = q.sense == :<= ? -Inf : -aff.constant
-            ub = q.sense == :>= ?  Inf : -aff.constant
-            aff.constant = 0
-            lc = JuMP.LinearConstraint(aff, lb, ub)
-            JuMP.addconstraint(m, lc)
+    linearized_quad_constrs = JuMP.ConstraintRef[]
+    for (F, S) in JuMP.list_of_constraint_types(m)
+        if F <: JuMP.GenericQuadExpr
+            for constr in JuMP.all_constraints(m, F, S)
+                q = JuMP.constraint_object(constr)
+                if !isconvex(q)
+                    # TODO: merge terms (i.e. x*y + 2x*y = 3x*y) (use MOIU.canonical, rewrite linearize_quadratic! in terms of MOI.ScalarQuadraticFunction)
+                    f = JuMP.jump_function(q)
+                    aff = linearize_quadratic!(m, f, product_dict, method, disc_level)
+                    set = JuMP.moi_set(q)
+                    interval = MOI.Interval(set)
+                    lb = interval.lower - JuMP.constant(aff)
+                    ub = interval.upper - JuMP.constant(aff)
+                    aff.constant = 0
+                    JuMP.@constraint(m, lb <= aff <= ub)
+                    push!(linearized_quad_constrs, constr)
+                end
+            end
         end
     end
-    empty!(m.quadconstr) # TODO: change with support for convex quadratic
+    for constr in linearized_quad_constrs
+        JuMP.delete(m, constr)
+    end
     nothing
 end
 
 function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dict, method::Symbol, disc_level::Int)
     aff = copy(t.aff)
-    for i in 1:length(t.qvars1)
-        x, y = t.qvars1[i], t.qvars2[i]
-        if haskey(product_dict, (x, y))
-            z = product_dict[(x,y)]
-        elseif haskey(product_dict, (y, x)) # should be unnecessary branch
-            z = product_dict[(y,x)]
-        else
+    for (coeff, x, y) in JuMP.quad_terms(t)
+        z = get!(product_dict, JuMP.UnorderedPair(x, y)) do
             @assert x != y # TODO: support non-bilinear terms
-            lˣ, lʸ = JuMP.getlowerbound(x), JuMP.getlowerbound(y)
-            uˣ, uʸ = JuMP.getupperbound(x), JuMP.getupperbound(y)
+            lˣ, lʸ = JuMP.lower_bound(x), JuMP.lower_bound(y)
+            uˣ, uʸ = JuMP.upper_bound(x), JuMP.upper_bound(y)
             @assert isfinite(lˣ) && isfinite(lʸ) && isfinite(uˣ) && isfinite(uʸ)
             hr = HyperRectangle((lˣ,lʸ), (uˣ,uʸ))
             mlf = MultilinearFunction(hr, (a,b) -> a*b)
             disc_levelˣ = lˣ == uˣ ? 1 : disc_level # if variable is fixed, no need to discretize
             disc_levelʸ = lʸ == uʸ ? 1 : (!(method in (:Logarithmic2D,:ZigZag2D)) ? 2 : disc_level)
-            # disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,disc_levelʸ))
-            disc = Discretization(linspace(lˣ,uˣ,disc_levelˣ), linspace(lʸ,uʸ,disc_levelʸ))
-            z = outerapproximate(m, (t.qvars1[i],t.qvars2[i]), mlf, disc, method)
-            product_dict[(x,y)] = z
-            product_dict[(y,x)] = z
+            # disc = Discretization(range(lˣ, stop=uˣ, length=disc_levelˣ),  range(lʸ, stop=uʸ, length=disc_levelʸ))
+            disc = Discretization(range(lˣ, stop=uˣ, length=disc_levelˣ),  range(lʸ, stop=uʸ, length=disc_levelʸ))
+            outerapproximate(m, (x, y), mlf, disc, method)
         end
-        append!(aff, t.qcoeffs[i]*z)
+        JuMP.add_to_expression!(aff, coeff / 2 * z)
     end
     aff
 end

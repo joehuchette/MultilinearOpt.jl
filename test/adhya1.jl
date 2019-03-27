@@ -1,7 +1,7 @@
 using JuMP, MultilinearOpt, BARON, Gurobi
 
-# m = Model(solver=BaronSolver())
-m = Model(solver=GurobiSolver())
+# m = Model(with_optimizer(Baron.Optimizer))
+m = Model(with_optimizer(Gurobi.Optimizer))
 
 #
 # Problem Topology
@@ -116,4 +116,4 @@ for l in L, j in J
 end
 
 relaxbilinear!(m)
-solve(m)
+optimize!(m)
