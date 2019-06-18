@@ -1,6 +1,9 @@
-using JuMP, MultilinearOpt, BARON, Gurobi
+using JuMP, MultilinearOpt
 
+# using BARON
 # m = Model(with_optimizer(Baron.Optimizer))
+
+using Gurobi
 m = Model(with_optimizer(Gurobi.Optimizer))
 
 #
