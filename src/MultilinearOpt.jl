@@ -206,7 +206,6 @@ function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D, disc_level::Int = 
             for constr in JuMP.all_constraints(m, F, S)
                 q = JuMP.constraint_object(constr)
                 if !isconvex(q)
-                    # TODO: merge terms (i.e. x*y + 2x*y = 3x*y) (use MOIU.canonical, rewrite linearize_quadratic! in terms of MOI.ScalarQuadraticFunction)
                     f = JuMP.jump_function(q)
                     aff = linearize_quadratic!(m, f, product_dict, method, disc_level)
                     set = JuMP.moi_set(q)
@@ -230,7 +229,7 @@ function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dic
     aff = copy(t.aff)
     for (coeff, x, y) in JuMP.quad_terms(t)
         z = get!(product_dict, JuMP.UnorderedPair(x, y)) do
-            @assert x != y # TODO: support non-bilinear terms
+            # TODO: better relaxation for the case x == y
             lˣ, lʸ = JuMP.lower_bound(x), JuMP.lower_bound(y)
             uˣ, uʸ = JuMP.upper_bound(x), JuMP.upper_bound(y)
             @assert isfinite(lˣ) && isfinite(lʸ) && isfinite(uˣ) && isfinite(uʸ)
@@ -242,7 +241,7 @@ function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dic
             disc = Discretization(range(lˣ, stop=uˣ, length=disc_levelˣ),  range(lʸ, stop=uʸ, length=disc_levelʸ))
             outerapproximate(m, (x, y), mlf, disc, method)
         end
-        JuMP.add_to_expression!(aff, coeff / 2 * z)
+        JuMP.add_to_expression!(aff, coeff * z)
     end
     aff
 end
