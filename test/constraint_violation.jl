@@ -15,7 +15,7 @@ function test_constraint_violation(f, xbounds::NTuple{2}, ybounds::NTuple{2};
     relaxbilinear!(m, method=method, disc_level=disc_level)
     for i = 1 : num_tests
         x̄ = xbounds[1] + rand(rng) * (xbounds[2] - xbounds[1])
-        ȳ = xbounds[1] + rand(rng) * (xbounds[2] - xbounds[1])
+        ȳ = ybounds[1] + rand(rng) * (ybounds[2] - ybounds[1])
         z̄ = f(x̄, ȳ) + rand(rng) - 0.5
         @objective m Min sum(x -> x^2, [x, y, z] - [x̄, ȳ, z̄])
         optimize!(m)
