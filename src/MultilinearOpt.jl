@@ -192,18 +192,25 @@ function isconvex(constr::JuMP.ScalarConstraint)
     end
 end
 
-function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D, disc_level::Int = 9)
+function relaxbilinear!(m::JuMP.Model; method=:Logarithmic1D, disc_level::Int = 9, constraints_to_skip=())
     # replace each bilinear term in (nonconvex) quadratic constraints with outer approx
-    product_dict = Dict{JuMP.UnorderedPair{JuMP.VariableRef}, JuMP.VariableRef}() #m.ext[:Multilinear].product_dict
-    obj = JuMP.objective_function(m)
-    if !isconvex(obj)
-        aff = linearize_quadratic!(m, obj, product_dict, method, disc_level)
-        JuMP.set_objective_function(m, aff)
+    product_dict = Dict{JuMP.UnorderedPair{JuMP.VariableRef}, Any}() #m.ext[:Multilinear].product_dict
+    sense = JuMP.objective_sense(m)
+    if sense !== MOI.FEASIBILITY_SENSE
+        @assert sense ∈ (MOI.MIN_SENSE, MOI.MAX_SENSE)
+        obj = JuMP.objective_function(m)
+        min_obj = sense == MOI.MIN_SENSE ? obj : -obj
+        if !isconvex(min_obj)
+            min_aff = linearize_quadratic!(m, min_obj, product_dict, method, disc_level)
+            aff = sense == MOI.MIN_SENSE ? min_aff : -min_aff
+            JuMP.set_objective_function(m, aff)
+        end
     end
     linearized_quad_constrs = JuMP.ConstraintRef[]
     for (F, S) in JuMP.list_of_constraint_types(m)
         if F <: JuMP.GenericQuadExpr
             for constr in JuMP.all_constraints(m, F, S)
+                constr ∈ constraints_to_skip && continue
                 q = JuMP.constraint_object(constr)
                 if !isconvex(q)
                     f = JuMP.jump_function(q)
@@ -230,6 +237,13 @@ function linearize_quadratic!(m::JuMP.Model, t::JuMP.QuadExpr, product_dict::Dic
     for (coeff, x, y) in JuMP.quad_terms(t)
         z = get!(product_dict, JuMP.UnorderedPair(x, y)) do
             # TODO: better relaxation for the case x == y
+            if JuMP.is_fixed(x) && JuMP.is_fixed(y)
+                return JuMP.fix_value(x) * JuMP.fix_value(y)
+            elseif JuMP.is_fixed(x)
+                return JuMP.fix_value(x) * y
+            elseif JuMP.is_fixed(y)
+                return x * JuMP.fix_value(y)
+            end
             lˣ, lʸ = JuMP.lower_bound(x), JuMP.lower_bound(y)
             uˣ, uʸ = JuMP.upper_bound(x), JuMP.upper_bound(y)
             @assert isfinite(lˣ) && isfinite(lʸ) && isfinite(uˣ) && isfinite(uʸ)
